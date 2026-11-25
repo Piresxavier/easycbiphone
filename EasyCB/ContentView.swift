@@ -99,7 +99,7 @@ struct ContentView: View {
 
                 ScrollView {
                     VStack(spacing: 5) {
-                        ForEach(Array(store.paiements.enumerated()), id: \.offset) { i, centimes in
+                        ForEach(Array(store.paiements.enumerated().reversed()), id: \.offset) { i, centimes in
                             Button("Paiement \(i + 1) : \(formater(centimes))") {
                                 indiceSelectionne = i
                                 afficherActions = true
