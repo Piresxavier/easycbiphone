@@ -112,6 +112,16 @@ struct ContentView: View {
                 }
             }
             .padding(20)
+            .sheet(isPresented: $afficherModification) {
+                ModificationView(texte: $texteModification) {
+                    if let c = parserMontant(texteModification) {
+                        store.modifier(indiceSelectionne, centimes: c)
+                        message = "Paiement modifié !"
+                    } else {
+                        message = "Montant invalide."
+                    }
+                }
+            }
         }
         .onAppear {
             dictee.onMessage = { texte in message = texte }
@@ -139,19 +149,6 @@ struct ContentView: View {
             }
             Button("Supprimer le paiement", role: .destructive) { afficherSuppression = true }
             Button("Annuler", role: .cancel) {}
-        }
-        .alert("Modifier le paiement", isPresented: $afficherModification) {
-            TextField("Nouveau montant (€)", text: $texteModification)
-                .keyboardType(.decimalPad)
-            Button("Annuler", role: .cancel) {}
-            Button("Enregistrer") {
-                if let c = parserMontant(texteModification) {
-                    store.modifier(indiceSelectionne, centimes: c)
-                    message = "Paiement modifié !"
-                } else {
-                    message = "Montant invalide."
-                }
-            }
         }
         .alert("Confirmer la suppression", isPresented: $afficherSuppression) {
             Button("Non", role: .cancel) {}
@@ -286,5 +283,50 @@ struct AnciensServicesView: View {
         .padding(10)
         .background(Couleurs.paiement)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ModificationView: View {
+    @Binding var texte: String
+    var enregistrer: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focus: Bool
+
+    var body: some View {
+        ZStack {
+            Couleurs.nuit.ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Text("Modifier le paiement")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+
+                TextField("", text: $texte, prompt:
+                    Text("Nouveau montant (€)").foregroundColor(Color(white: 0.65)))
+                    .keyboardType(.decimalPad)
+                    .focused($focus)
+                    .font(.system(size: 22))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 55)
+                    .background(Couleurs.paiement)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                HStack(spacing: 10) {
+                    Button("Annuler") { dismiss() }
+                        .buttonStyle(BoutonCB(couleur: Couleurs.bouton, taille: 15, hauteur: 50))
+                    Button("Enregistrer") {
+                        enregistrer()
+                        dismiss()
+                    }
+                    .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 15, hauteur: 50))
+                }
+
+                Spacer()
+            }
+            .padding(20)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { focus = true }
     }
 }
