@@ -3,6 +3,9 @@ import SwiftUI
 /// Durée (en secondes) avant l'ajout automatique du paiement si on ne touche à rien.
 let delaiValidation = 5
 
+/// Numéro de version affiché en bas de l'écran (pour vérifier quelle version est installée).
+let versionApp = "1.3"
+
 struct BoutonCB: ButtonStyle {
     var couleur: Color
     var taille: CGFloat = 17
@@ -114,6 +117,10 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                Text("version \(versionApp)")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(white: 0.5))
             }
             .padding(20)
             .sheet(isPresented: $afficherModification) {
