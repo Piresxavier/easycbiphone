@@ -101,18 +101,17 @@ final class Store: ObservableObject {
         sauvegarder()
     }
 
-    /// Archive le service en cours. Retourne false s'il n'y a rien à archiver.
-    func cloturer() -> Bool {
-        guard !donnees.service_en_cours.isEmpty else { return false }
+    /// Archive le service en cours. Retourne le service archivé, ou nil s'il n'y avait rien à archiver.
+    func cloturer() -> Service? {
+        guard !donnees.service_en_cours.isEmpty else { return nil }
         let f = DateFormatter()
         f.locale = Locale(identifier: "fr_FR")
         f.dateFormat = "dd/MM/yyyy HH:mm"
-        donnees.anciens_services.append(
-            Service(date_cloture: f.string(from: Date()), paiements: donnees.service_en_cours)
-        )
+        let service = Service(date_cloture: f.string(from: Date()), paiements: donnees.service_en_cours)
+        donnees.anciens_services.append(service)
         donnees.service_en_cours = []
         sauvegarder()
-        return true
+        return service
     }
 
     func supprimerService(_ indice: Int) {

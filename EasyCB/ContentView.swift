@@ -3,6 +3,9 @@ import SwiftUI
 /// Durée (en secondes) avant l'ajout automatique du paiement si on ne touche à rien.
 let delaiValidation = 5
 
+/// Numéro de version affiché en bas de l'écran (pour vérifier quelle version est installée).
+let versionApp = "1.4"
+
 struct BoutonCB: ButtonStyle {
     var couleur: Color
     var taille: CGFloat = 17
@@ -30,6 +33,9 @@ struct ContentView: View {
     // Fenêtre de confirmation du paiement
     @State private var montantAConfirmer: Int?
     @State private var confirmationVocale = false
+
+    // Fenêtre affichée après la clôture d'un service
+    @State private var recapService: Service?
 
     @State private var indiceSelectionne = 0
     @State private var afficherActions = false
@@ -86,9 +92,12 @@ struct ContentView: View {
                     .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 19, gras: true))
 
                 Button("Clôturer le service") {
-                    message = store.cloturer()
-                        ? "Service clôturé et archivé !"
-                        : "Aucun paiement à archiver."
+                    if let service = store.cloturer() {
+                        message = "Service clôturé et archivé !"
+                        recapService = service
+                    } else {
+                        message = "Aucun paiement à archiver."
+                    }
                 }
                 .buttonStyle(BoutonCB(couleur: Couleurs.bouton))
 
@@ -114,6 +123,10 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                Text("version \(versionApp)")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(white: 0.5))
             }
             .padding(20)
             .sheet(isPresented: $afficherModification) {
@@ -134,6 +147,10 @@ struct ContentView: View {
                     valider: validerPaiement,
                     annuler: annulerPaiement
                 )
+            }
+
+            if let service = recapService {
+                RecapClotureView(service: service) { recapService = nil }
             }
         }
         .onAppear {
@@ -227,6 +244,60 @@ struct ContentView: View {
     }
 }
 
+/// Fenêtre affichée après la clôture : propose d'envoyer le récapitulatif du service.
+struct RecapClotureView: View {
+    let service: Service
+    var fermer: () -> Void
+
+    @State private var partage: TexteAPartager?
+    @State private var envoye = false
+
+    var body: some View {
+        let nombre = service.paiements.count
+
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Text("Service clôturé")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text(formater(service.paiements.reduce(0, +)))
+                    .font(.system(size: 46, weight: .bold))
+                    .foregroundColor(Couleurs.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+
+                Text("\(nombre) paiement\(nombre > 1 ? "s" : "")")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(white: 0.8))
+
+                Button(envoye ? "Renvoyer le récapitulatif" : "Envoyer le récapitulatif") {
+                    partage = TexteAPartager(texte: texteRecap(service))
+                }
+                .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 18, gras: true))
+
+                Button(envoye ? "Fermer" : "Plus tard") { fermer() }
+                    .buttonStyle(BoutonCB(couleur: Couleurs.bouton, taille: 17))
+            }
+            .padding(22)
+            .background(Couleurs.nuit)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Couleurs.turquoise, lineWidth: 1)
+            )
+            .padding(24)
+        }
+        .sheet(item: $partage) { p in
+            ShareSheet(items: [p.texte]) { ok in
+                if ok { envoye = true }
+            }
+        }
+    }
+}
+
 /// Fenêtre affichée avant d'ajouter un paiement : montant bien visible,
 /// boutons Annuler / Valider, et ajout automatique à la fin du compte à rebours.
 struct ConfirmationPaiementView: View {
@@ -296,6 +367,7 @@ struct AnciensServicesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var indiceASupprimer: Int?
+    @State private var texteAPartager: TexteAPartager?
 
     var body: some View {
         ZStack {
@@ -328,6 +400,9 @@ struct AnciensServicesView: View {
             .padding(16)
         }
         .preferredColorScheme(.dark)
+        .sheet(item: $texteAPartager) { t in
+            ShareSheet(items: [t.texte])
+        }
         .alert("Confirmer la suppression", isPresented: Binding(
             get: { indiceASupprimer != nil },
             set: { if !$0 { indiceASupprimer = nil } }
@@ -358,9 +433,13 @@ struct AnciensServicesView: View {
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Supprimer") { indiceASupprimer = indice }
-                .buttonStyle(BoutonCB(couleur: Couleurs.rouge, taille: 13, hauteur: 38))
-                .frame(width: 90)
+            VStack(spacing: 8) {
+                Button("Envoyer") { texteAPartager = TexteAPartager(texte: texteRecap(service)) }
+                    .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 13, hauteur: 38))
+                Button("Supprimer") { indiceASupprimer = indice }
+                    .buttonStyle(BoutonCB(couleur: Couleurs.rouge, taille: 13, hauteur: 38))
+            }
+            .frame(width: 90)
         }
         .padding(10)
         .background(Couleurs.paiement)
