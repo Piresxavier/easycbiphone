@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// Durée (en secondes) avant l'ajout automatique du paiement si on ne touche à rien.
+let delaiValidation = 5
+
 struct BoutonCB: ButtonStyle {
     var couleur: Color
     var taille: CGFloat = 17
@@ -23,8 +26,10 @@ struct ContentView: View {
 
     @State private var saisie = ""
     @State private var message = ""
-    @State private var montantEnAttente: String?
-    @State private var tacheAjoutVocal: Task<Void, Never>?
+
+    // Fenêtre de confirmation du paiement
+    @State private var montantAConfirmer: Int?
+    @State private var confirmationVocale = false
 
     @State private var indiceSelectionne = 0
     @State private var afficherActions = false
@@ -66,7 +71,6 @@ struct ContentView: View {
 
                     Button {
                         champActif = false
-                        annulerAjoutVocal()
                         dictee.basculer()
                     } label: {
                         Image(systemName: dictee.enCours ? "mic.fill" : "mic")
@@ -78,7 +82,7 @@ struct ContentView: View {
                     .frame(width: 70)
                 }
 
-                Button("Ajouter paiement") { ajouterPaiement() }
+                Button("Ajouter paiement") { demanderConfirmation(depuisVoix: false) }
                     .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 19, gras: true))
 
                 Button("Clôturer le service") {
@@ -122,22 +126,24 @@ struct ContentView: View {
                     }
                 }
             }
+
+            if let centimes = montantAConfirmer {
+                ConfirmationPaiementView(
+                    centimes: centimes,
+                    delai: delaiValidation,
+                    valider: validerPaiement,
+                    annuler: annulerPaiement
+                )
+            }
         }
         .onAppear {
             dictee.onMessage = { texte in message = texte }
             dictee.onTexte = { texte in recevoirDictee(texte) }
         }
-        .onChange(of: saisie) { nouvelle in
-            if let attendu = montantEnAttente, nouvelle != attendu {
-                annulerAjoutVocal()
-                message = "Ajout automatique annulé."
-            }
-        }
         .onChange(of: champActif) { actif in
-            if actif && (dictee.enCours || montantEnAttente != nil) {
+            if actif && dictee.enCours {
                 dictee.arreter()
-                annulerAjoutVocal()
-                message = "Dictée arrêtée. Montant non ajouté."
+                message = "Dictée arrêtée."
             }
         }
         .confirmationDialog("Gestion du paiement", isPresented: $afficherActions, titleVisibility: .visible) {
@@ -164,23 +170,50 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Ajout d'un paiement (avec fenêtre de confirmation)
 
-    private func ajouterPaiement() {
+    private func demanderConfirmation(depuisVoix: Bool) {
+        guard montantAConfirmer == nil else { return }
         guard let centimes = parserMontant(saisie) else {
             message = "Montant invalide."
+            if depuisVoix { dictee.reprendre() }
             return
         }
-        montantEnAttente = nil
+        champActif = false
+        confirmationVocale = depuisVoix
+        montantAConfirmer = centimes
+    }
+
+    private func validerPaiement() {
+        guard let centimes = montantAConfirmer else { return }
+        montantAConfirmer = nil
         store.ajouter(centimes)
         saisie = ""
-        champActif = false
         message = "Paiement ajouté !"
+        if confirmationVocale { dictee.reprendre() }
+        confirmationVocale = false
+    }
+
+    private func annulerPaiement() {
+        guard montantAConfirmer != nil else { return }
+        montantAConfirmer = nil
+        message = "Paiement annulé."
+        if confirmationVocale {
+            saisie = ""          // montant mal compris : on efface
+            dictee.reprendre()
+        }                         // en saisie manuelle, on garde le montant pour le corriger
+        confirmationVocale = false
     }
 
     // MARK: - Dictée
 
     private func recevoirDictee(_ brut: String) {
+        // Une fenêtre de confirmation est déjà ouverte : on ignore et on continue d'écouter.
+        guard montantAConfirmer == nil else {
+            dictee.reprendre()
+            return
+        }
+
         let montant = normaliserDictee(brut)
         guard !montant.isEmpty, parserMontant(montant) != nil else {
             message = "Aucun montant reconnu."
@@ -188,24 +221,73 @@ struct ContentView: View {
             return
         }
 
-        tacheAjoutVocal?.cancel()
-        montantEnAttente = montant
         saisie = montant
-        message = "Montant : \(montant)\nAjout dans 3 secondes. Modifiez le champ pour annuler."
+        message = ""
+        demanderConfirmation(depuisVoix: true)
+    }
+}
 
-        tacheAjoutVocal = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            if Task.isCancelled { return }
-            guard montantEnAttente == montant, saisie == montant else { return }
-            ajouterPaiement()
-            dictee.reprendre()
-        }
+/// Fenêtre affichée avant d'ajouter un paiement : montant bien visible,
+/// boutons Annuler / Valider, et ajout automatique à la fin du compte à rebours.
+struct ConfirmationPaiementView: View {
+    let centimes: Int
+    let delai: Int
+    var valider: () -> Void
+    var annuler: () -> Void
+
+    @State private var restant: Int
+
+    init(centimes: Int, delai: Int, valider: @escaping () -> Void, annuler: @escaping () -> Void) {
+        self.centimes = centimes
+        self.delai = delai
+        self.valider = valider
+        self.annuler = annuler
+        _restant = State(initialValue: delai)
     }
 
-    private func annulerAjoutVocal() {
-        tacheAjoutVocal?.cancel()
-        tacheAjoutVocal = nil
-        montantEnAttente = nil
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Text("Nouveau paiement")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color(white: 0.85))
+
+                Text(formater(centimes))
+                    .font(.system(size: 54, weight: .bold))
+                    .foregroundColor(Couleurs.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+
+                Text("Ajout automatique dans \(restant) s")
+                    .font(.system(size: 15))
+                    .foregroundColor(Color(white: 0.75))
+
+                HStack(spacing: 12) {
+                    Button("Annuler") { annuler() }
+                        .buttonStyle(BoutonCB(couleur: Couleurs.rouge, taille: 19, gras: true))
+                    Button("Valider") { valider() }
+                        .buttonStyle(BoutonCB(couleur: Couleurs.turquoise, taille: 19, gras: true))
+                }
+            }
+            .padding(22)
+            .background(Couleurs.nuit)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Couleurs.turquoise, lineWidth: 1)
+            )
+            .padding(24)
+        }
+        .task {
+            while restant > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                restant -= 1
+            }
+            if !Task.isCancelled { valider() }
+        }
     }
 }
 
